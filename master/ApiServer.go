@@ -94,8 +94,54 @@ ERR:
 	}
 }
 
-func handleJobList() error {
+func handleJobList(resp http.ResponseWriter,req *http.Request) {
+	var (
+		jobList []*common.Job
+		bytes []byte
+		err error
+	)
+	if jobList,err = G_jobMgr.ListJobs(); err != nil {
+		goto ERR
+	}
+	//正常应答
+	if bytes,err = common.BuildResponse(0,"success",jobList);err == nil {
+		resp.Write(bytes)
+	}
+	return
 
+ERR:
+	if bytes,err = common.BuildResponse(-1,err.Error(),nil); err == nil {
+		resp.Write(bytes)
+	}
+}
+//强制杀死某个任务
+//post /job/kill name=job1
+func handleJobKill(resp http.ResponseWriter, req *http.Request){
+	var (
+		err error
+		name string
+		bytes []byte
+	)
+	//解析post表单
+	if err = req.ParseForm(); err != nil {
+		goto ERR
+	}
+	//要杀死的任务名
+	name = req.PostForm.Get("name")
+	fmt.Println(name)
+	//杀死任务
+	if err = G_jobMgr.KillJob(name);err!=nil {
+		goto  ERR
+	}
+	//正常应答
+	if bytes,err = common.BuildResponse(0,"success",nil);err == nil {
+		resp.Write(bytes)
+	}
+	return
+ERR:
+	if bytes,err = common.BuildResponse(-1,err.Error(),nil); err == nil {
+		resp.Write(bytes)
+	}
 }
 //初始化服务
 func InitApiServer() error{
@@ -104,6 +150,8 @@ func InitApiServer() error{
 		listener net.Listener
 		httpServer *http.Server
 		err error
+		staticDir http.Dir
+		staticHandler http.Handler
 	)
 
 	//配置路由
@@ -111,6 +159,15 @@ func InitApiServer() error{
 	mux.HandleFunc("/job/save",handleJobSave)
 	mux.HandleFunc("/job/delete",handleJobDelete)
 	mux.HandleFunc("/job/list",handleJobList)
+	mux.HandleFunc("/job/kill",handleJobKill)
+
+	//index.html
+
+	//静态文件目录
+	staticDir = http.Dir(G_config.WebRoot)
+	staticHandler = http.FileServer(staticDir)
+	mux.Handle("/",http.StripPrefix("/",staticHandler))// ./webroot/index.html
+
 	//启动tcp监听
 	if listener,err = net.Listen("tcp",":"+strconv.Itoa(G_config.ApiPort));err != nil {
 		return err
@@ -126,8 +183,6 @@ func InitApiServer() error{
 		httpServer: httpServer,
 
 	}
-
 	go httpServer.Serve(listener)
-
 	return nil
 }

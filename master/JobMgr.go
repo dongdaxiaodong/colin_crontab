@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/mvcc/mvccpb"
+	"github.com/coreos/etcd/mvcc/mvccpb"
 	"time"
 )
 
@@ -108,11 +108,12 @@ func (jobMgr *JobMgr) DeleteJob(name string) (oldJob *common.Job,err error) {
 }
 
 //列举任务
-func(jobMgr *JobMgr) ListJobs(joblist []*common.Job,err error){
+func(jobMgr *JobMgr) ListJobs()(jobList []*common.Job,err error){
 	var(
 		dirKey string
 		getResp *clientv3.GetResponse
 		kvPair *mvccpb.KeyValue
+		job *common.Job
 	)
 	//任务保存的目录
 	dirKey = common.JOB_SAVE_DIR
@@ -120,6 +121,41 @@ func(jobMgr *JobMgr) ListJobs(joblist []*common.Job,err error){
 	if getResp,err = jobMgr.kv.Get(context.TODO(),dirKey,clientv3.WithPrefix()); err != nil {
 		return
 	}
-	//便利所有任务，进行反序列化
-	for  _,kvPair= range getResp.Kvs
+	//初始化数组空间
+	jobList = make([]*common.Job,0)
+	//len(jobList)==0
+	//遍历所有任务，进行反序列化
+	for  _,kvPair= range getResp.Kvs {
+		job = &common.Job{}
+		if err = json.Unmarshal(kvPair.Value,job); err != nil {
+			err = nil
+			continue
+		}
+		jobList = append(jobList, job)
+	}
+	return
+}
+
+//杀死任务
+func (jobMgr *JobMgr) KillJob(name string)(err error){
+	//更新一下/cron/killer/任务名
+	var(
+		killerKey string
+		leaseGrantResp *clientv3.LeaseGrantResponse
+		leaseId clientv3.LeaseID
+	)
+	//通知worker杀死对应任务
+	killerKey = common.JOB_KILLER_DIR + name
+	fmt.Println(killerKey)
+	//让worker监听到一次put操作,创建一个租约让其稍后自动过期即可
+	if leaseGrantResp,err = jobMgr.lease.Grant(context.TODO(),1);err != nil {
+		return
+	}
+	//租约id
+	leaseId = leaseGrantResp.ID
+	//设置killer标记
+	if _,err = jobMgr.kv.Put(context.TODO(),killerKey,"",clientv3.WithLease(leaseId));err != nil {
+		return
+	}
+	return
 }
